@@ -1,0 +1,24 @@
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    systems.url = "github:nix-systems/default";
+  };
+
+  outputs =
+    {
+      nixpkgs,
+      systems,
+      ...
+    }:
+
+    let
+      eachSystem = nixpkgs.lib.genAttrs (import systems);
+      pkgsFor = eachSystem (system: import nixpkgs { inherit system; });
+    in
+
+    {
+      devShells = eachSystem (system: {
+        default = with pkgsFor.${system}; mkShellNoCC { packages = [ deno ]; };
+      });
+    };
+}
