@@ -1,23 +1,11 @@
-import { err, ok, Result } from "npm:neverthrow@8.1.1";
+import { err, ok, Result, ResultAsync, safeTry } from "npm:neverthrow@8.1.1";
 import { parseArgs } from "node:util";
 import { assertEquals } from "jsr:@std/assert@1.0.8";
 
-type InputError = {
-    type: "FILE_READ_ERROR" | "STDIN_READ_ERROR" | "ARGUMENT_ERROR";
-    message: string;
-    cause?: unknown;
-};
-
-const readFromFile = (path: string): Promise<Result<string, InputError>> =>
-    Deno.readTextFile(path)
-        .then(ok)
-        .catch((cause) =>
-            err({
-                type: "FILE_READ_ERROR",
-                message: "Failed to read file",
-                cause,
-            })
-        );
+const readFromFile = ResultAsync.fromThrowable(
+    Deno.readTextFile,
+    (e) => new Error("Failed to read file", { cause: e }),
+);
 
 Deno.test("readFromFile - success", async () => {
     const tempFile = await Deno.makeTempFile();
@@ -32,27 +20,16 @@ Deno.test("readFromFile - success", async () => {
 Deno.test("readFromFile - error", async () => {
     const result = await readFromFile("non-existent-file.txt");
     assertEquals(result.isErr(), true);
-    if (result.isErr()) {
-        assertEquals(result.error.type, "FILE_READ_ERROR");
-    }
 });
 
-const readFromStdin = async (): Promise<Result<string, InputError>> => {
-    try {
-        const decoder = new TextDecoder();
-        let input = "";
-        for await (const chunk of Deno.stdin.readable) {
-            input += decoder.decode(chunk);
-        }
-        return ok(input);
-    } catch (cause) {
-        return err({
-            type: "STDIN_READ_ERROR",
-            message: "Failed to read from stdin",
-            cause,
-        });
+const readFromStdin = ResultAsync.fromThrowable(async (): Promise<string> => {
+    const decoder = new TextDecoder(undefined, { fatal: true });
+    let input = "";
+    for await (const chunk of Deno.stdin.readable) {
+        input += decoder.decode(chunk);
     }
-};
+    return input;
+}, (e) => new Error("Failed to read from stdin", { cause: e }));
 
 Deno.test("readFromStdin - mock success", async () => {
     const originalStdin = Deno.stdin;
@@ -92,10 +69,9 @@ Examples:
   deno run --allow-read scripts/squash-message.ts input.txt
   cat input.txt | deno run --allow-read scripts/squash-message.ts
 `);
-    Deno.exit(0);
 };
 
-const getInput = (filePath?: string): Promise<Result<string, InputError>> =>
+const getInput = (filePath?: string): ResultAsync<string, Error> =>
     filePath ? readFromFile(filePath) : readFromStdin();
 
 const createTemplate = (input: string) =>
@@ -214,12 +190,11 @@ Deno.test("createTemplate - preserves input formatting", () => {
 
 const validateArgs = (
     positionals: string[],
-): Result<string | undefined, InputError> => {
+): Result<string | undefined, Error> => {
     if (positionals.length > 1) {
-        return err({
-            type: "FILE_READ_ERROR",
-            message: "Too many arguments. Expected 0 or 1 filepath argument.",
-        });
+        return err(
+            new Error("Too many arguments. Expected 0 or 1 filepath argument."),
+        );
     }
     return ok(positionals[0]);
 };
@@ -237,61 +212,41 @@ Deno.test("validateArgs - success with one arg", () => {
 Deno.test("validateArgs - error with too many args", () => {
     const result = validateArgs(["file1.txt", "file2.txt"]);
     assertEquals(result.isErr(), true);
-    if (result.isErr()) {
-        assertEquals(result.error.type, "FILE_READ_ERROR");
-    }
 });
 
-const parseArguments = (): Result<string | undefined, InputError> => {
-    try {
-        const { values, positionals } = parseArgs({
-            args: Deno.args,
-            options: {
-                help: {
-                    type: "boolean",
-                    short: "h",
-                },
+const parseArguments = Result.fromThrowable(() => {
+    return parseArgs({
+        args: Deno.args,
+        options: {
+            help: {
+                type: "boolean",
+                short: "h",
             },
-            allowPositionals: true,
-        });
+        },
+        allowPositionals: true,
+    });
+}, (e) => new Error("Failed to parse arguments", { cause: e }));
+
+const main = () => {
+    return safeTry<void, Error>(async function* () {
+        const { values, positionals } = yield* parseArguments();
 
         if (values.help) {
             showHelp();
+            Deno.exit(0);
         }
 
-        return validateArgs(positionals);
-    } catch (cause) {
-        return err({
-            type: "ARGUMENT_ERROR",
-            message: "Failed to parse arguments",
-            cause,
-        });
-    }
+        const filePath = yield* validateArgs(positionals);
+        const input = yield* await getInput(filePath);
+
+        const template = createTemplate(input.trim());
+        console.log(template);
+
+        Deno.exit(0);
+    });
 };
 
-const main = async (): Promise<void> => {
-    const filePath = parseArguments();
-
-    if (filePath.isErr()) {
-        console.error(filePath.error.message);
-        Deno.exit(1);
-    }
-
-    const result = await getInput(filePath.value);
-
-    result
-        .map((text: string) => text.trim())
-        .map(createTemplate)
-        .match(
-            console.log,
-            (e: InputError) => {
-                console.error(e.message, e.cause);
-                Deno.exit(1);
-            },
-        );
-};
-
-main().catch((e) => {
-    console.error("Unexpected error occurred:", e);
+main().mapErr((e) => {
+    console.error(e.message);
     Deno.exit(1);
 });
