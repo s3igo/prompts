@@ -1,6 +1,8 @@
 import { err, ok, Result, ResultAsync, safeTry } from "npm:neverthrow@8.1.1";
-import { parseArgs } from "node:util";
+import { createAnthropic } from "npm:@ai-sdk/anthropic@1.0.2";
+import { streamText } from "npm:ai@4.0.9";
 import { assertEquals } from "jsr:@std/assert@1.0.8";
+import { parseArgs } from "node:util";
 
 const readFromFile = ResultAsync.fromThrowable(
     Deno.readTextFile,
@@ -22,7 +24,7 @@ Deno.test("readFromFile - error", async () => {
     assertEquals(result.isErr(), true);
 });
 
-const readFromStdin = ResultAsync.fromThrowable(async (): Promise<string> => {
+const readFromStdin = ResultAsync.fromThrowable<[], string, Error>(async () => {
     const decoder = new TextDecoder(undefined, { fatal: true });
     let input = "";
     for await (const chunk of Deno.stdin.readable) {
@@ -54,27 +56,31 @@ Deno.test("readFromStdin - mock success", async () => {
 });
 
 const showHelp = () => {
-    console.log(`
-Usage: squash-message [options] [filepath]
+    console.log(`Generate a squash commit message template
 
-Generate a squash commit message template.
-
-Options:
-  -h, --help     Show this help message
+Usage:
+  squash-message [OPTIONS] [filepath]
+  deno run --allow-read --allow-net --allow-env scripts/squash-message.ts [options] [filepath]
 
 Arguments:
   filepath       Path to input file (reads from stdin if omitted)
 
+Options:
+  -h, --help     Show this help message
+
 Examples:
-  deno run --allow-read scripts/squash-message.ts input.txt
-  cat input.txt | deno run --allow-read scripts/squash-message.ts
+  squash-message input.txt
+  cat input.txt | squash-message
+
+  # In Vim, you can use it as a filter command:
+  :%!squash-message
 `);
 };
 
 const getInput = (filePath?: string): ResultAsync<string, Error> =>
     filePath ? readFromFile(filePath) : readFromStdin();
 
-const createTemplate = (input: string) =>
+const createPrompt = (input: string) =>
     `\`<commit_message>\`タグで囲まれたコミットメッセージのリストに基づいて、次の指示に従いGitのsquashコミットメッセージを生成してください。
 
 1. Subjectは50文字以下で変更内容を要約すること。
@@ -171,18 +177,18 @@ const createTemplate = (input: string) =>
 ${input}
 </commit_message>`;
 
-Deno.test("createTemplate - basic functionality", () => {
+Deno.test("createPrompt - basic functionality", () => {
     const input = "feat: Add new feature\n\nDescription of the feature";
-    const result = createTemplate(input);
+    const result = createPrompt(input);
 
     assertEquals(result.includes(input), true);
     assertEquals(result.includes("<commit_message>"), true);
     assertEquals(result.includes("</commit_message>"), true);
 });
 
-Deno.test("createTemplate - preserves input formatting", () => {
+Deno.test("createPrompt - preserves input formatting", () => {
     const input = "# Comment line\n* Bullet point";
-    const result = createTemplate(input);
+    const result = createPrompt(input);
 
     assertEquals(result.includes("# Comment line"), true);
     assertEquals(result.includes("* Bullet point"), true);
@@ -227,6 +233,22 @@ const parseArguments = Result.fromThrowable(() => {
     });
 }, (e) => new Error("Failed to parse arguments", { cause: e }));
 
+const writeStreamText = ResultAsync.fromThrowable<
+    [AsyncIterable<string>],
+    void,
+    Error
+>(async (textStream) => {
+    const encoder = new TextEncoder();
+    for await (const text of textStream) {
+        Deno.stdout.write(encoder.encode(text));
+    }
+}, (e) => new Error("Failed to write stream text", { cause: e }));
+
+const anthropic = createAnthropic({
+    apiKey: Deno.env.get("SQUASH_MESSAGE_API_KEY"),
+});
+const model = anthropic("claude-3-5-sonnet-20241022");
+
 const main = () => {
     return safeTry<void, Error>(async function* () {
         const { values, positionals } = yield* parseArguments();
@@ -238,9 +260,17 @@ const main = () => {
 
         const filePath = yield* validateArgs(positionals);
         const input = yield* await getInput(filePath);
+        const prompt = createPrompt(input.trim());
 
-        const template = createTemplate(input.trim());
-        console.log(template);
+        const { textStream } = streamText({
+            model,
+            prompt,
+            maxTokens: 1024,
+            temperature: 0,
+        });
+
+        const _ = yield* writeStreamText(textStream);
+        _ satisfies void;
 
         Deno.exit(0);
     });
