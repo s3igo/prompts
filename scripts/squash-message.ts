@@ -1,5 +1,6 @@
 import { err, ok, Result } from "npm:neverthrow@8.1.1";
 import { parseArgs } from "node:util";
+import { assertEquals } from "jsr:@std/assert@1.0.8";
 
 type InputError = {
     type: "FILE_READ_ERROR" | "STDIN_READ_ERROR" | "ARGUMENT_ERROR";
@@ -18,6 +19,24 @@ const readFromFile = (path: string): Promise<Result<string, InputError>> =>
             })
         );
 
+Deno.test("readFromFile - success", async () => {
+    const tempFile = await Deno.makeTempFile();
+    await Deno.writeTextFile(tempFile, "test content");
+
+    const result = await readFromFile(tempFile);
+    assertEquals(result, ok("test content"));
+
+    await Deno.remove(tempFile);
+});
+
+Deno.test("readFromFile - error", async () => {
+    const result = await readFromFile("non-existent-file.txt");
+    assertEquals(result.isErr(), true);
+    if (result.isErr()) {
+        assertEquals(result.error.type, "FILE_READ_ERROR");
+    }
+});
+
 const readFromStdin = async (): Promise<Result<string, InputError>> => {
     try {
         const decoder = new TextDecoder();
@@ -34,6 +53,28 @@ const readFromStdin = async (): Promise<Result<string, InputError>> => {
         });
     }
 };
+
+Deno.test("readFromStdin - mock success", async () => {
+    const originalStdin = Deno.stdin;
+    try {
+        const mockInput = new TextEncoder().encode("test input");
+        const readable = new ReadableStream({
+            start(controller) {
+                controller.enqueue(mockInput);
+                controller.close();
+            },
+        });
+
+        // @ts-expect-error: stdinをモックする
+        Deno.stdin = { readable };
+
+        const result = await readFromStdin();
+        assertEquals(result, ok("test input"));
+    } finally {
+        // @ts-expect-error: stdinを元に戻す
+        Deno.stdin = originalStdin;
+    }
+});
 
 const showHelp = () => {
     console.log(`
@@ -154,6 +195,23 @@ const createTemplate = (input: string) =>
 ${input}
 </commit_message>`;
 
+Deno.test("createTemplate - basic functionality", () => {
+    const input = "feat: Add new feature\n\nDescription of the feature";
+    const result = createTemplate(input);
+
+    assertEquals(result.includes(input), true);
+    assertEquals(result.includes("<commit_message>"), true);
+    assertEquals(result.includes("</commit_message>"), true);
+});
+
+Deno.test("createTemplate - preserves input formatting", () => {
+    const input = "# Comment line\n* Bullet point";
+    const result = createTemplate(input);
+
+    assertEquals(result.includes("# Comment line"), true);
+    assertEquals(result.includes("* Bullet point"), true);
+});
+
 const validateArgs = (
     positionals: string[],
 ): Result<string | undefined, InputError> => {
@@ -165,6 +223,24 @@ const validateArgs = (
     }
     return ok(positionals[0]);
 };
+
+Deno.test("validateArgs - success with no args", () => {
+    const result = validateArgs([]);
+    assertEquals(result, ok(undefined));
+});
+
+Deno.test("validateArgs - success with one arg", () => {
+    const result = validateArgs(["file.txt"]);
+    assertEquals(result, ok("file.txt"));
+});
+
+Deno.test("validateArgs - error with too many args", () => {
+    const result = validateArgs(["file1.txt", "file2.txt"]);
+    assertEquals(result.isErr(), true);
+    if (result.isErr()) {
+        assertEquals(result.error.type, "FILE_READ_ERROR");
+    }
+});
 
 const parseArguments = (): Result<string | undefined, InputError> => {
     try {
