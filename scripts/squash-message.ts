@@ -4,9 +4,9 @@ import { streamText } from "npm:ai@4.0.9";
 import { assertEquals } from "jsr:@std/assert@1.0.8";
 import { parseArgs } from "node:util";
 
-const parseArguments = Result.fromThrowable(() => {
+const parseArguments = Result.fromThrowable((args: string[]) => {
     return parseArgs({
-        args: Deno.args,
+        args,
         options: {
             help: {
                 type: "boolean",
@@ -24,6 +24,51 @@ const parseArguments = Result.fromThrowable(() => {
         allowPositionals: true,
     });
 }, (e) => new Error("Failed to parse arguments", { cause: e }));
+
+Deno.test("parseArguments", async (t) => {
+    await t.step("success with no args", () => {
+        const result = parseArguments([]);
+        assertEquals(result.isOk(), true);
+        if (result.isOk()) {
+            assertEquals(result.value.values.help, undefined);
+            assertEquals(result.value.values["api-key"], undefined);
+            assertEquals(result.value.values["dry-run"], undefined);
+            assertEquals(result.value.positionals.length, 0);
+        }
+    });
+
+    await t.step("success with help flag", () => {
+        const result = parseArguments(["--help"]);
+        assertEquals(result.isOk(), true);
+        if (result.isOk()) {
+            assertEquals(result.value.values.help, true);
+        }
+    });
+
+    await t.step("success with api key", () => {
+        const result = parseArguments(["--api-key", "test-key"]);
+        assertEquals(result.isOk(), true);
+        if (result.isOk()) {
+            assertEquals(result.value.values["api-key"], "test-key");
+        }
+    });
+
+    await t.step("success with dry run", () => {
+        const result = parseArguments(["--dry-run"]);
+        assertEquals(result.isOk(), true);
+        if (result.isOk()) {
+            assertEquals(result.value.values["dry-run"], true);
+        }
+    });
+
+    await t.step("success with filepath", () => {
+        const result = parseArguments(["test.txt"]);
+        assertEquals(result.isOk(), true);
+        if (result.isOk()) {
+            assertEquals(result.value.positionals, ["test.txt"]);
+        }
+    });
+});
 
 const showHelp = () => {
     console.log(`Generate a squash commit message template
@@ -324,9 +369,80 @@ const writeStreamText = ResultAsync.fromThrowable<
     }
 }, (e) => new Error("Failed to write stream text", { cause: e }));
 
+Deno.test("writeStreamText", async (t) => {
+    await t.step("success with text stream", async () => {
+        const originalStdout = Deno.stdout;
+        const chunks: Uint8Array[] = [];
+
+        async function* mockTextStream() {
+            yield "Hello";
+            yield " ";
+            yield "World";
+        }
+
+        try {
+            // モックのstdoutを作成
+            const mockStdout = {
+                write(chunk: Uint8Array) {
+                    chunks.push(chunk);
+                    return Promise.resolve(chunk.length);
+                },
+            };
+
+            // @ts-expect-error: stdoutをモックに置き換え
+            Deno.stdout = mockStdout;
+
+            const result = await writeStreamText(mockTextStream());
+            assertEquals(result.isOk(), true);
+
+            // 出力された内容を確認
+            const decoder = new TextDecoder();
+            const output = chunks
+                .map((chunk) => decoder.decode(chunk))
+                .join("");
+            assertEquals(output, "Hello World");
+        } finally {
+            // @ts-expect-error: stdoutを元に戻す
+            Deno.stdout = originalStdout;
+        }
+    });
+
+    await t.step("error handling", async () => {
+        const originalStdout = Deno.stdout;
+
+        async function* mockTextStream() {
+            yield "Test";
+        }
+
+        try {
+            // エラーを投げるモックのstdoutを作成
+            const mockStdout = {
+                write() {
+                    throw new Error("Mock write error");
+                },
+            };
+
+            // @ts-expect-error: stdoutをモックに置き換え
+            Deno.stdout = mockStdout;
+
+            const result = await writeStreamText(mockTextStream());
+            assertEquals(result.isErr(), true);
+            if (result.isErr()) {
+                assertEquals(
+                    result.error.message,
+                    "Failed to write stream text",
+                );
+            }
+        } finally {
+            // @ts-expect-error: stdoutを元に戻す
+            Deno.stdout = originalStdout;
+        }
+    });
+});
+
 const main = () => {
     return safeTry<void, Error>(async function* () {
-        const { values, positionals } = yield* parseArguments();
+        const { values, positionals } = yield* parseArguments(Deno.args);
 
         if (values.help) {
             showHelp();
