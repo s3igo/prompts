@@ -9,19 +9,21 @@ const readFromFile = ResultAsync.fromThrowable(
     (e) => new Error("Failed to read file", { cause: e }),
 );
 
-Deno.test("readFromFile - success", async () => {
-    const tempFile = await Deno.makeTempFile();
-    await Deno.writeTextFile(tempFile, "test content");
+Deno.test("readFromFile", async (t) => {
+    await t.step("success", async () => {
+        const tempFile = await Deno.makeTempFile();
+        await Deno.writeTextFile(tempFile, "test content");
 
-    const result = await readFromFile(tempFile);
-    assertEquals(result, ok("test content"));
+        const result = await readFromFile(tempFile);
+        assertEquals(result, ok("test content"));
 
-    await Deno.remove(tempFile);
-});
+        await Deno.remove(tempFile);
+    });
 
-Deno.test("readFromFile - error", async () => {
-    const result = await readFromFile("non-existent-file.txt");
-    assertEquals(result.isErr(), true);
+    await t.step("error", async () => {
+        const result = await readFromFile("non-existent-file.txt");
+        assertEquals(result.isErr(), true);
+    });
 });
 
 const readFromStdin = ResultAsync.fromThrowable<[], string, Error>(async () => {
@@ -33,26 +35,28 @@ const readFromStdin = ResultAsync.fromThrowable<[], string, Error>(async () => {
     return input;
 }, (e) => new Error("Failed to read from stdin", { cause: e }));
 
-Deno.test("readFromStdin - mock success", async () => {
-    const originalStdin = Deno.stdin;
-    try {
-        const mockInput = new TextEncoder().encode("test input");
-        const readable = new ReadableStream({
-            start(controller) {
-                controller.enqueue(mockInput);
-                controller.close();
-            },
-        });
+Deno.test("readFromStdin", async (t) => {
+    await t.step("mock success", async () => {
+        const originalStdin = Deno.stdin;
+        try {
+            const mockInput = new TextEncoder().encode("test input");
+            const readable = new ReadableStream({
+                start(controller) {
+                    controller.enqueue(mockInput);
+                    controller.close();
+                },
+            });
 
-        // @ts-expect-error: stdinをモックする
-        Deno.stdin = { readable };
+            // @ts-expect-error: stdinをモックする
+            Deno.stdin = { readable };
 
-        const result = await readFromStdin();
-        assertEquals(result, ok("test input"));
-    } finally {
-        // @ts-expect-error: stdinを元に戻す
-        Deno.stdin = originalStdin;
-    }
+            const result = await readFromStdin();
+            assertEquals(result, ok("test input"));
+        } finally {
+            // @ts-expect-error: stdinを元に戻す
+            Deno.stdin = originalStdin;
+        }
+    });
 });
 
 const showHelp = () => {
@@ -183,21 +187,23 @@ const createPrompt = (input: string) =>
 ${input}
 </commit_message>`;
 
-Deno.test("createPrompt - basic functionality", () => {
-    const input = "feat: Add new feature\n\nDescription of the feature";
-    const result = createPrompt(input);
+Deno.test("createPrompt", async (t) => {
+    await t.step("basic functionality", () => {
+        const input = "feat: Add new feature\n\nDescription of the feature";
+        const result = createPrompt(input);
 
-    assertEquals(result.includes(input), true);
-    assertEquals(result.includes("<commit_message>"), true);
-    assertEquals(result.includes("</commit_message>"), true);
-});
+        assertEquals(result.includes(input), true);
+        assertEquals(result.includes("<commit_message>"), true);
+        assertEquals(result.includes("</commit_message>"), true);
+    });
 
-Deno.test("createPrompt - preserves input formatting", () => {
-    const input = "# Comment line\n* Bullet point";
-    const result = createPrompt(input);
+    await t.step("preserves input formatting", () => {
+        const input = "# Comment line\n* Bullet point";
+        const result = createPrompt(input);
 
-    assertEquals(result.includes("# Comment line"), true);
-    assertEquals(result.includes("* Bullet point"), true);
+        assertEquals(result.includes("# Comment line"), true);
+        assertEquals(result.includes("* Bullet point"), true);
+    });
 });
 
 const parsePositionals = (
@@ -208,19 +214,21 @@ const parsePositionals = (
     return positionals.length > 1 ? err(error()) : ok(positionals[0]);
 };
 
-Deno.test("parsePositionals - success with no args", () => {
-    const result = parsePositionals([]);
-    assertEquals(result, ok(undefined));
-});
+Deno.test("parsePositionals", async (t) => {
+    await t.step("success with no args", () => {
+        const result = parsePositionals([]);
+        assertEquals(result, ok(undefined));
+    });
 
-Deno.test("parsePositionals - success with one arg", () => {
-    const result = parsePositionals(["file.txt"]);
-    assertEquals(result, ok("file.txt"));
-});
+    await t.step("success with one arg", () => {
+        const result = parsePositionals(["file.txt"]);
+        assertEquals(result, ok("file.txt"));
+    });
 
-Deno.test("parsePositionals - error with too many args", () => {
-    const result = parsePositionals(["file1.txt", "file2.txt"]);
-    assertEquals(result.isErr(), true);
+    await t.step("error with too many args", () => {
+        const result = parsePositionals(["file1.txt", "file2.txt"]);
+        assertEquals(result.isErr(), true);
+    });
 });
 
 const parseArguments = Result.fromThrowable(() => {
@@ -262,56 +270,58 @@ const getApiKey = (cliApiKey?: string): Result<string, Error> => {
     return apiKey ? ok(apiKey) : err(new Error("API key not found"));
 };
 
-Deno.test("getApiKey - success with SQUASH_MESSAGE_API_KEY", () => {
-    try {
-        Deno.env.set("SQUASH_MESSAGE_API_KEY", "test-key-1");
-        const result = getApiKey();
-        assertEquals(result, ok("test-key-1"));
-    } finally {
+Deno.test("getApiKey", async (t) => {
+    await t.step("success with SQUASH_MESSAGE_API_KEY", () => {
+        try {
+            Deno.env.set("SQUASH_MESSAGE_API_KEY", "test-key-1");
+            const result = getApiKey();
+            assertEquals(result, ok("test-key-1"));
+        } finally {
+            Deno.env.delete("SQUASH_MESSAGE_API_KEY");
+        }
+    });
+
+    await t.step("success with ANTHROPIC_API_KEY", () => {
+        try {
+            Deno.env.set("ANTHROPIC_API_KEY", "test-key-2");
+            const result = getApiKey();
+            assertEquals(result, ok("test-key-2"));
+        } finally {
+            Deno.env.delete("ANTHROPIC_API_KEY");
+        }
+    });
+
+    await t.step("error when no key is set", () => {
         Deno.env.delete("SQUASH_MESSAGE_API_KEY");
-    }
-});
-
-Deno.test("getApiKey - success with ANTHROPIC_API_KEY", () => {
-    try {
-        Deno.env.set("ANTHROPIC_API_KEY", "test-key-2");
-        const result = getApiKey();
-        assertEquals(result, ok("test-key-2"));
-    } finally {
         Deno.env.delete("ANTHROPIC_API_KEY");
-    }
-});
+        const result = getApiKey();
+        assertEquals(result.isErr(), true);
+    });
 
-Deno.test("getApiKey - error when no key is set", () => {
-    Deno.env.delete("SQUASH_MESSAGE_API_KEY");
-    Deno.env.delete("ANTHROPIC_API_KEY");
-    const result = getApiKey();
-    assertEquals(result.isErr(), true);
-});
-
-Deno.test("getApiKey - success with CLI api key", () => {
-    const cliApiKey = "cli-test-key";
-    const result = getApiKey(cliApiKey);
-    assertEquals(result, ok(cliApiKey));
-});
-
-Deno.test("getApiKey - respects API key priority order", () => {
-    try {
-        Deno.env.set("SQUASH_MESSAGE_API_KEY", "squash-key");
-        Deno.env.set("ANTHROPIC_API_KEY", "anthropic-key");
-
-        // CLI引数が最優先
+    await t.step("success with CLI api key", () => {
         const cliApiKey = "cli-test-key";
-        let result = getApiKey(cliApiKey);
+        const result = getApiKey(cliApiKey);
         assertEquals(result, ok(cliApiKey));
+    });
 
-        // SQUASH_MESSAGE_API_KEYが次に優先
-        result = getApiKey();
-        assertEquals(result, ok("squash-key"));
-    } finally {
-        Deno.env.delete("SQUASH_MESSAGE_API_KEY");
-        Deno.env.delete("ANTHROPIC_API_KEY");
-    }
+    await t.step("respects API key priority order", () => {
+        try {
+            Deno.env.set("SQUASH_MESSAGE_API_KEY", "squash-key");
+            Deno.env.set("ANTHROPIC_API_KEY", "anthropic-key");
+
+            // CLI引数が最優先
+            const cliApiKey = "cli-test-key";
+            let result = getApiKey(cliApiKey);
+            assertEquals(result, ok(cliApiKey));
+
+            // SQUASH_MESSAGE_API_KEYが次に優先
+            result = getApiKey();
+            assertEquals(result, ok("squash-key"));
+        } finally {
+            Deno.env.delete("SQUASH_MESSAGE_API_KEY");
+            Deno.env.delete("ANTHROPIC_API_KEY");
+        }
+    });
 });
 
 const main = () => {
