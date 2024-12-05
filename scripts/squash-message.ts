@@ -4,6 +4,80 @@ import { streamText } from "npm:ai@4.0.9";
 import { assertEquals } from "jsr:@std/assert@1.0.8";
 import { parseArgs } from "node:util";
 
+const parseArguments = Result.fromThrowable(() => {
+    return parseArgs({
+        args: Deno.args,
+        options: {
+            help: {
+                type: "boolean",
+                short: "h",
+            },
+            "api-key": {
+                type: "string",
+                short: "k",
+            },
+            "dry-run": {
+                type: "boolean",
+                short: "d",
+            },
+        },
+        allowPositionals: true,
+    });
+}, (e) => new Error("Failed to parse arguments", { cause: e }));
+
+const showHelp = () => {
+    console.log(`Generate a squash commit message template
+
+Usage:
+  squash-message [OPTIONS] [filepath]
+  deno run --allow-read --allow-net --allow-env scripts/squash-message.ts [options] [filepath]
+
+Arguments:
+  filepath       Path to input file (reads from stdin if omitted)
+
+Options:
+  -h, --help            Show this help message
+  -k, --api-key <key>   API key for Anthropic Claude (highest priority)
+  -d, --dry-run         Display the generated prompt text without sending to LLM
+
+Environment Variables:
+  SQUASH_MESSAGE_API_KEY  API key for Anthropic Claude (preferred)
+  ANTHROPIC_API_KEY       Alternative API key for Anthropic Claude
+
+Examples:
+  squash-message input.txt
+  cat input.txt | squash-message
+
+  # In Vim, you can use it as a filter command:
+  :%!squash-message
+`);
+};
+
+const parsePositionals = (
+    positionals: string[],
+): Result<string | undefined, Error> => {
+    const error = () =>
+        new Error("Too many arguments. Expected 0 or 1 filepath argument.");
+    return positionals.length > 1 ? err(error()) : ok(positionals[0]);
+};
+
+Deno.test("parsePositionals", async (t) => {
+    await t.step("success with no args", () => {
+        const result = parsePositionals([]);
+        assertEquals(result, ok(undefined));
+    });
+
+    await t.step("success with one arg", () => {
+        const result = parsePositionals(["file.txt"]);
+        assertEquals(result, ok("file.txt"));
+    });
+
+    await t.step("error with too many args", () => {
+        const result = parsePositionals(["file1.txt", "file2.txt"]);
+        assertEquals(result.isErr(), true);
+    });
+});
+
 const readFromFile = ResultAsync.fromThrowable(
     Deno.readTextFile,
     (e) => new Error("Failed to read file", { cause: e }),
@@ -58,34 +132,6 @@ Deno.test("readFromStdin", async (t) => {
         }
     });
 });
-
-const showHelp = () => {
-    console.log(`Generate a squash commit message template
-
-Usage:
-  squash-message [OPTIONS] [filepath]
-  deno run --allow-read --allow-net --allow-env scripts/squash-message.ts [options] [filepath]
-
-Arguments:
-  filepath       Path to input file (reads from stdin if omitted)
-
-Options:
-  -h, --help            Show this help message
-  -k, --api-key <key>   API key for Anthropic Claude (highest priority)
-  -d, --dry-run         Display the generated prompt text without sending to LLM
-
-Environment Variables:
-  SQUASH_MESSAGE_API_KEY  API key for Anthropic Claude (preferred)
-  ANTHROPIC_API_KEY       Alternative API key for Anthropic Claude
-
-Examples:
-  squash-message input.txt
-  cat input.txt | squash-message
-
-  # In Vim, you can use it as a filter command:
-  :%!squash-message
-`);
-};
 
 const getInput = (filePath?: string): ResultAsync<string, Error> =>
     filePath ? readFromFile(filePath) : readFromStdin();
@@ -206,63 +252,6 @@ Deno.test("createPrompt", async (t) => {
     });
 });
 
-const parsePositionals = (
-    positionals: string[],
-): Result<string | undefined, Error> => {
-    const error = () =>
-        new Error("Too many arguments. Expected 0 or 1 filepath argument.");
-    return positionals.length > 1 ? err(error()) : ok(positionals[0]);
-};
-
-Deno.test("parsePositionals", async (t) => {
-    await t.step("success with no args", () => {
-        const result = parsePositionals([]);
-        assertEquals(result, ok(undefined));
-    });
-
-    await t.step("success with one arg", () => {
-        const result = parsePositionals(["file.txt"]);
-        assertEquals(result, ok("file.txt"));
-    });
-
-    await t.step("error with too many args", () => {
-        const result = parsePositionals(["file1.txt", "file2.txt"]);
-        assertEquals(result.isErr(), true);
-    });
-});
-
-const parseArguments = Result.fromThrowable(() => {
-    return parseArgs({
-        args: Deno.args,
-        options: {
-            help: {
-                type: "boolean",
-                short: "h",
-            },
-            "api-key": {
-                type: "string",
-                short: "k",
-            },
-            "dry-run": {
-                type: "boolean",
-                short: "d",
-            },
-        },
-        allowPositionals: true,
-    });
-}, (e) => new Error("Failed to parse arguments", { cause: e }));
-
-const writeStreamText = ResultAsync.fromThrowable<
-    [AsyncIterable<string>],
-    void,
-    Error
->(async (textStream) => {
-    const encoder = new TextEncoder();
-    for await (const text of textStream) {
-        Deno.stdout.write(encoder.encode(text));
-    }
-}, (e) => new Error("Failed to write stream text", { cause: e }));
-
 const getApiKey = (cliApiKey?: string): Result<string, Error> => {
     const apiKey = cliApiKey ??
         Deno.env.get("SQUASH_MESSAGE_API_KEY") ??
@@ -323,6 +312,17 @@ Deno.test("getApiKey", async (t) => {
         }
     });
 });
+
+const writeStreamText = ResultAsync.fromThrowable<
+    [AsyncIterable<string>],
+    void,
+    Error
+>(async (textStream) => {
+    const encoder = new TextEncoder();
+    for await (const text of textStream) {
+        Deno.stdout.write(encoder.encode(text));
+    }
+}, (e) => new Error("Failed to write stream text", { cause: e }));
 
 const main = () => {
     return safeTry<void, Error>(async function* () {
