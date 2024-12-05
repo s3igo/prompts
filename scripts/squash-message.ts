@@ -66,7 +66,12 @@ Arguments:
   filepath       Path to input file (reads from stdin if omitted)
 
 Options:
-  -h, --help     Show this help message
+  -h, --help            Show this help message
+  -k, --api-key <key>   API key for Anthropic Claude (highest priority)
+
+Environment Variables:
+  SQUASH_MESSAGE_API_KEY  API key for Anthropic Claude (preferred)
+  ANTHROPIC_API_KEY       Alternative API key for Anthropic Claude
 
 Examples:
   squash-message input.txt
@@ -225,6 +230,10 @@ const parseArguments = Result.fromThrowable(() => {
                 type: "boolean",
                 short: "h",
             },
+            "api-key": {
+                type: "string",
+                short: "k",
+            },
         },
         allowPositionals: true,
     });
@@ -241,10 +250,64 @@ const writeStreamText = ResultAsync.fromThrowable<
     }
 }, (e) => new Error("Failed to write stream text", { cause: e }));
 
-const anthropic = createAnthropic({
-    apiKey: Deno.env.get("SQUASH_MESSAGE_API_KEY"),
+const getApiKey = (cliApiKey?: string): Result<string, Error> => {
+    const apiKey = cliApiKey ??
+        Deno.env.get("SQUASH_MESSAGE_API_KEY") ??
+        Deno.env.get("ANTHROPIC_API_KEY");
+    return apiKey ? ok(apiKey) : err(new Error("API key not found"));
+};
+
+Deno.test("getApiKey - success with SQUASH_MESSAGE_API_KEY", () => {
+    try {
+        Deno.env.set("SQUASH_MESSAGE_API_KEY", "test-key-1");
+        const result = getApiKey();
+        assertEquals(result, ok("test-key-1"));
+    } finally {
+        Deno.env.delete("SQUASH_MESSAGE_API_KEY");
+    }
 });
-const model = anthropic("claude-3-5-sonnet-20241022");
+
+Deno.test("getApiKey - success with ANTHROPIC_API_KEY", () => {
+    try {
+        Deno.env.set("ANTHROPIC_API_KEY", "test-key-2");
+        const result = getApiKey();
+        assertEquals(result, ok("test-key-2"));
+    } finally {
+        Deno.env.delete("ANTHROPIC_API_KEY");
+    }
+});
+
+Deno.test("getApiKey - error when no key is set", () => {
+    Deno.env.delete("SQUASH_MESSAGE_API_KEY");
+    Deno.env.delete("ANTHROPIC_API_KEY");
+    const result = getApiKey();
+    assertEquals(result.isErr(), true);
+});
+
+Deno.test("getApiKey - success with CLI api key", () => {
+    const cliApiKey = "cli-test-key";
+    const result = getApiKey(cliApiKey);
+    assertEquals(result, ok(cliApiKey));
+});
+
+Deno.test("getApiKey - respects API key priority order", () => {
+    try {
+        Deno.env.set("SQUASH_MESSAGE_API_KEY", "squash-key");
+        Deno.env.set("ANTHROPIC_API_KEY", "anthropic-key");
+
+        // CLI引数が最優先
+        const cliApiKey = "cli-test-key";
+        let result = getApiKey(cliApiKey);
+        assertEquals(result, ok(cliApiKey));
+
+        // SQUASH_MESSAGE_API_KEYが次に優先
+        result = getApiKey();
+        assertEquals(result, ok("squash-key"));
+    } finally {
+        Deno.env.delete("SQUASH_MESSAGE_API_KEY");
+        Deno.env.delete("ANTHROPIC_API_KEY");
+    }
+});
 
 const main = () => {
     return safeTry<void, Error>(async function* () {
@@ -260,7 +323,9 @@ const main = () => {
         const prompt = createPrompt(input.trim());
 
         const { textStream } = streamText({
-            model,
+            model: yield* getApiKey(values["api-key"])
+                .map((apiKey) => createAnthropic({ apiKey }))
+                .map((anthropic) => anthropic("claude-3-5-sonnet-20241022")),
             prompt,
             maxTokens: 1024,
             temperature: 0,
