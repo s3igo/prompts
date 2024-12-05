@@ -194,29 +194,26 @@ Deno.test("createPrompt - preserves input formatting", () => {
     assertEquals(result.includes("* Bullet point"), true);
 });
 
-const validateArgs = (
+const parsePositionals = (
     positionals: string[],
 ): Result<string | undefined, Error> => {
-    if (positionals.length > 1) {
-        return err(
-            new Error("Too many arguments. Expected 0 or 1 filepath argument."),
-        );
-    }
-    return ok(positionals[0]);
+    const error = () =>
+        new Error("Too many arguments. Expected 0 or 1 filepath argument.");
+    return positionals.length > 1 ? err(error()) : ok(positionals[0]);
 };
 
-Deno.test("validateArgs - success with no args", () => {
-    const result = validateArgs([]);
+Deno.test("parsePositionals - success with no args", () => {
+    const result = parsePositionals([]);
     assertEquals(result, ok(undefined));
 });
 
-Deno.test("validateArgs - success with one arg", () => {
-    const result = validateArgs(["file.txt"]);
+Deno.test("parsePositionals - success with one arg", () => {
+    const result = parsePositionals(["file.txt"]);
     assertEquals(result, ok("file.txt"));
 });
 
-Deno.test("validateArgs - error with too many args", () => {
-    const result = validateArgs(["file1.txt", "file2.txt"]);
+Deno.test("parsePositionals - error with too many args", () => {
+    const result = parsePositionals(["file1.txt", "file2.txt"]);
     assertEquals(result.isErr(), true);
 });
 
@@ -258,7 +255,7 @@ const main = () => {
             Deno.exit(0);
         }
 
-        const filePath = yield* validateArgs(positionals);
+        const filePath = yield* parsePositionals(positionals);
         const input = yield* await getInput(filePath);
         const prompt = createPrompt(input.trim());
 
