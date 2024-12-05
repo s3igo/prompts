@@ -14,6 +14,13 @@
     let
       eachSystem = nixpkgs.lib.genAttrs (import systems);
       pkgsFor = eachSystem (system: import nixpkgs { inherit system; });
+      mkOverlays =
+        names:
+        nixpkgs.lib.genAttrs names (
+          name: final: prev: {
+            ${name} = prev.callPackage ./packages/${name}.nix { };
+          }
+        );
     in
 
     {
@@ -29,5 +36,7 @@
       devShells = eachSystem (system: {
         default = with pkgsFor.${system}; mkShellNoCC { packages = [ deno ]; };
       });
+
+      overlays = mkOverlays [ "squash-message" ];
     };
 }
