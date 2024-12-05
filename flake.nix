@@ -17,6 +17,15 @@
     in
 
     {
+      packages = eachSystem (
+        system:
+        with pkgsFor.${system};
+        lib.packagesFromDirectoryRecursive {
+          inherit callPackage;
+          directory = ./packages;
+        }
+      );
+
       devShells = eachSystem (system: {
         default = with pkgsFor.${system}; mkShellNoCC { packages = [ deno ]; };
       });
