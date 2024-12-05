@@ -68,6 +68,7 @@ Arguments:
 Options:
   -h, --help            Show this help message
   -k, --api-key <key>   API key for Anthropic Claude (highest priority)
+  -d, --dry-run         Display the generated prompt text without sending to LLM
 
 Environment Variables:
   SQUASH_MESSAGE_API_KEY  API key for Anthropic Claude (preferred)
@@ -234,6 +235,10 @@ const parseArguments = Result.fromThrowable(() => {
                 type: "string",
                 short: "k",
             },
+            "dry-run": {
+                type: "boolean",
+                short: "d",
+            },
         },
         allowPositionals: true,
     });
@@ -321,6 +326,11 @@ const main = () => {
         const filePath = yield* parsePositionals(positionals);
         const input = yield* await getInput(filePath);
         const prompt = createPrompt(input.trim());
+
+        if (values["dry-run"]) {
+            console.log(prompt);
+            Deno.exit(0);
+        }
 
         const { textStream } = streamText({
             model: yield* getApiKey(values["api-key"])
