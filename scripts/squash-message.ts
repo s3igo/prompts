@@ -455,7 +455,9 @@ const main = () => {
     return safeTry<void, Error>(async function* () {
         const { values, positionals } = yield* parseArguments(Deno.args);
 
-        if (values.help) {
+        const hasNoInputSource = Deno.stdin.isTerminal() &&
+            positionals.length == 0;
+        if (values.help || hasNoInputSource) {
             return ok(console.log(HELP_TEXT));
         }
 
