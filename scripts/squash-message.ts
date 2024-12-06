@@ -74,7 +74,11 @@ const HELP_TEXT = `Generate a squash commit message template
 
 Usage:
   squash-message [OPTIONS] [filepath]
-  deno run --allow-read --allow-net --allow-env scripts/squash-message.ts [options] [filepath]
+  command | squash-message [OPTIONS]
+  nix run github:s3igo/prompts#squash-message -- [OPTIONS] [filepath]
+  # -R = --allow-read, -N = --allow-net, -E = --allow-env
+  deno run -RNE scripts/squash-message.ts [OPTIONS] [filepath]
+  deno run -RNE https://raw.githubusercontent.com/s3igo/prompts/refs/heads/main/scripts/squash-message.ts [OPTIONS] [filepath]
 
 Arguments:
   filepath       Path to input file (reads from stdin if omitted)
