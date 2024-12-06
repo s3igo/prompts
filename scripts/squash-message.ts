@@ -100,13 +100,13 @@ Examples:
   :%!squash-message
 `;
 
-const parsePositionals = (
+function parsePositionals(
     positionals: string[],
-): Result<string | undefined, Error> => {
+): Result<string | undefined, Error> {
     const error = () =>
         new Error("Too many arguments. Expected 0 or 1 filepath argument.");
     return positionals.length > 1 ? err(error()) : ok(positionals[0]);
-};
+}
 
 Deno.test("parsePositionals", async (t) => {
     await t.step("success with no args", () => {
@@ -180,11 +180,12 @@ Deno.test("readFromStdin", async (t) => {
     });
 });
 
-const getInput = (filePath?: string): ResultAsync<string, Error> =>
-    filePath ? readFromFile(filePath) : readFromStdin();
+function getInput(filePath?: string): ResultAsync<string, Error> {
+    return filePath ? readFromFile(filePath) : readFromStdin();
+}
 
-const createPrompt = (input: string) =>
-    `\`<commit_message>\`タグで囲まれたコミットメッセージのリストに基づいて、次の指示に従いGitのsquashコミットメッセージを生成してください。
+function createPrompt(input: string) {
+    return `\`<commit_message>\`タグで囲まれたコミットメッセージのリストに基づいて、次の指示に従いGitのsquashコミットメッセージを生成してください。
 
 1. Subjectは50文字以下で変更内容を要約すること。
 2. Subjectにはコミットメッセージの型（例: fix, feat, docsなど）を含めないこと。
@@ -279,6 +280,7 @@ const createPrompt = (input: string) =>
 <commit_message>
 ${input}
 </commit_message>`;
+}
 
 Deno.test("createPrompt", async (t) => {
     await t.step("basic functionality", () => {
@@ -299,12 +301,12 @@ Deno.test("createPrompt", async (t) => {
     });
 });
 
-const getApiKey = (cliApiKey?: string): Result<string, Error> => {
+function getApiKey(cliApiKey?: string): Result<string, Error> {
     const apiKey = cliApiKey ??
         Deno.env.get("SQUASH_MESSAGE_API_KEY") ??
         Deno.env.get("ANTHROPIC_API_KEY");
     return apiKey ? ok(apiKey) : err(new Error("API key not found"));
-};
+}
 
 Deno.test("getApiKey", async (t) => {
     await t.step("success with SQUASH_MESSAGE_API_KEY", () => {
@@ -360,7 +362,7 @@ Deno.test("getApiKey", async (t) => {
     });
 });
 
-const requestLlm = (apiKey: string, prompt: string) => {
+function requestLlm(apiKey: string, prompt: string) {
     const anthropic = createAnthropic({ apiKey });
     return streamText({
         model: anthropic("claude-3-5-sonnet-20241022"),
@@ -368,7 +370,7 @@ const requestLlm = (apiKey: string, prompt: string) => {
         maxTokens: 1024,
         temperature: 0,
     });
-};
+}
 
 const writeStreamText = ResultAsync.fromThrowable(
     async (textStream: AsyncIterable<string>) => {
@@ -451,7 +453,7 @@ Deno.test("writeStreamText", async (t) => {
     });
 });
 
-const main = () => {
+function main() {
     return safeTry<void, Error>(async function* () {
         const { values, positionals } = yield* parseArguments(Deno.args);
 
@@ -474,7 +476,7 @@ const main = () => {
 
         return ok(yield* await writeStreamText(textStream));
     });
-};
+}
 
 if (import.meta.main) {
     await main()
