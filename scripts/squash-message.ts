@@ -70,8 +70,7 @@ Deno.test("parseArguments", async (t) => {
     });
 });
 
-const showHelp = () => {
-    console.log(`Generate a squash commit message template
+const HELP_TEXT = `Generate a squash commit message template
 
 Usage:
   squash-message [OPTIONS] [filepath]
@@ -95,8 +94,7 @@ Examples:
 
   # In Vim, you can use it as a filter command:
   :%!squash-message
-`);
-};
+`;
 
 const parsePositionals = (
     positionals: string[],
@@ -145,7 +143,7 @@ Deno.test("readFromFile", async (t) => {
     });
 });
 
-const readFromStdin = ResultAsync.fromThrowable<[], string, Error>(async () => {
+const readFromStdin = ResultAsync.fromThrowable(async (): Promise<string> => {
     const decoder = new TextDecoder(undefined, { fatal: true });
     let input = "";
     for await (const chunk of Deno.stdin.readable) {
@@ -358,16 +356,25 @@ Deno.test("getApiKey", async (t) => {
     });
 });
 
-const writeStreamText = ResultAsync.fromThrowable<
-    [AsyncIterable<string>],
-    void,
-    Error
->(async (textStream) => {
-    const encoder = new TextEncoder();
-    for await (const text of textStream) {
-        Deno.stdout.write(encoder.encode(text));
-    }
-}, (e) => new Error("Failed to write stream text", { cause: e }));
+const requestLlm = (apiKey: string, prompt: string) => {
+    const anthropic = createAnthropic({ apiKey });
+    return streamText({
+        model: anthropic("claude-3-5-sonnet-20241022"),
+        prompt,
+        maxTokens: 1024,
+        temperature: 0,
+    });
+};
+
+const writeStreamText = ResultAsync.fromThrowable(
+    async (textStream: AsyncIterable<string>) => {
+        const encoder = new TextEncoder();
+        for await (const text of textStream) {
+            Deno.stdout.write(encoder.encode(text));
+        }
+    },
+    (e) => new Error("Failed to write stream text", { cause: e }),
+);
 
 Deno.test("writeStreamText", async (t) => {
     await t.step("success with text stream", async () => {
@@ -445,8 +452,7 @@ const main = () => {
         const { values, positionals } = yield* parseArguments(Deno.args);
 
         if (values.help) {
-            showHelp();
-            Deno.exit(0);
+            return ok(console.log(HELP_TEXT));
         }
 
         const filePath = yield* parsePositionals(positionals);
@@ -454,27 +460,18 @@ const main = () => {
         const prompt = createPrompt(input.trim());
 
         if (values["dry-run"]) {
-            console.log(prompt);
-            Deno.exit(0);
+            return ok(console.log(prompt));
         }
 
-        const { textStream } = streamText({
-            model: yield* getApiKey(values["api-key"])
-                .map((apiKey) => createAnthropic({ apiKey }))
-                .map((anthropic) => anthropic("claude-3-5-sonnet-20241022")),
-            prompt,
-            maxTokens: 1024,
-            temperature: 0,
-        });
+        const apiKey = yield* getApiKey(values["api-key"]);
+        const { textStream } = requestLlm(apiKey, prompt);
 
-        const _ = yield* writeStreamText(textStream);
-        _ satisfies void;
-
-        Deno.exit(0);
+        return ok(yield* await writeStreamText(textStream));
     });
 };
 
-main().mapErr((e) => {
-    console.error(e.message);
-    Deno.exit(1);
-});
+if (import.meta.main) {
+    await main()
+        .mapErr((e) => console.error("Error:", e.message))
+        .match(() => Deno.exit(0), () => Deno.exit(1));
+}
